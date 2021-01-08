@@ -1,0 +1,293 @@
+;---------------------------------------------------------------;
+;						  		;
+;		    	CSTARTUP.S03				;
+;						      		;
+; This module contains the entire code executed before the C	;
+; "main" function is called.  The code can be tailored to suit	;
+; special hardware needs.  The code is designed to run on any	;
+; processor based on the 8051 architecture.			;
+;						   		;
+; Version: 4.00 [A.R. 01/Jan/90]				;
+;---------------------------------------------------------------;
+	NAME	CSTARTUP
+
+$defmodel.inc				; Defines memory model
+
+	EXTERN	?C_EXIT			; Where to go when program is done
+	EXTERN	_R			; Register bank (0, 8, 16 or 24)
+	EXTERN	main			; First C function usually
+
+;---------------------------------------------------------------;
+; The C stack segment. Should be mapped into internal data RAM	;
+;---------------------------------------------------------------;
+; The C stack is used for LCALL's and temporary storage for   	;
+; code generator help-routines (math etc).  The stack will be	;
+; located after all other internal RAM variables if the stan-	;
+; dard linking procedure is followed.  Note that C interrupt	;
+; routines can double stack size demands.			;
+;---------------------------------------------------------------;
+
+	RSEG	CSTACK
+stack_begin:
+	DS	30			; Increase if needed
+
+	COMMON	INTVEC			; Should be at location zero
+
+;---------------------------------------------------------------;
+; C interrupt routines with defined [vectors] will reserve	;
+; space in this area.  So will handlers written in assembler if	;
+; they follow the recommended format.				;
+;---------------------------------------------------------------;
+
+startup:
+	LJMP	init_C
+
+
+	RSEG	RCODE			; Should be loaded after INTVEC
+init_C:
+	MOV	SP,#stack_begin - 1	; From low to high addresses
+
+;---------------------------------------------------------------;
+; 	      C variable initialization section		      	;
+; 	      =================================		      	;
+; 							      	;
+; If there is no demand that global/static C variables should	;
+; have a defined value at startup (required by ANSI), the	;
+; following section can be removed to conserve code memory	;
+; size.   Note that this part calls functions in the end of	;
+; this file, that also can be removed if initialized values are ;
+; not needed.			      				;
+;                                                             	;
+; Systems controlled by a watch-dog may require additional    	;
+; code insertions as the initialization can take several      	;
+; milliseconds (if there are many variables) to complete.     	;
+; These parts are marked with	 *** WDG ***		      	;
+;---------------------------------------------------------------;
+
+;===============================================================;
+; Zero out sections containing variables without explicit	;
+; initializers like in:						;
+;								;
+;	int i;							;
+;	xdata double d[10];					;
+;===============================================================;
+
+	MOV	R0,#stack_begin - 1		; Assumes that CSTACK is last
+CLEAR_IRAM:
+	MOV	@R0,#0
+	DJNZ	R0,CLEAR_IRAM
+	
+;        MOV     DPTR,#SFE (X_UDATA)             ; XDATA
+;        MOV     R6,DPH
+;        MOV     R7,DPL
+;        MOV     DPTR,#SFB (X_UDATA)
+;NEXT_X_UDATA:
+;        LCALL   COMP_R67_DPTR
+;        JZ      INIT_VARS
+;        CLR     A
+;        MOVX    @DPTR,A
+;        INC     DPTR
+;        SJMP    NEXT_X_UDATA
+
+;===============================================================;
+; Copy initializers into the proper memory segments for decla-	;
+; rations like:							;
+;								;
+; 	int i = 7;						;
+;	idata char *cp = "STRING";				;
+;===============================================================;
+
+INIT_VARS:
+	MOV	DPTR,#DATA_TABLE		; DATA
+	LCALL	DI_INIT
+	MOV	DPTR,#IDATA_TABLE		; IDATA
+	LCALL	DI_INIT
+;        MOV     DPTR,#XDATA_TABLE               ; XDATA
+;        LCALL   X_INIT
+;        MOV     DPTR,#YDATA_TABLE               ; For the -y compiler option
+;        LCALL   X_INIT
+
+;---------------------------------------------------------------;
+; 	   C variable initialization section end	      	;
+;---------------------------------------------------------------;
+
+;---------------------------------------------------------------;
+; Activate the (at link-time) selected register bank.		;
+;---------------------------------------------------------------;
+
+	MOV	PSW,#_R
+
+;---------------------------------------------------------------;
+; If hardware must be initiated from assembly or if interrupts	;
+; should be on when reaching main, this is the place to insert	;
+; such code.						      	;
+;---------------------------------------------------------------;
+
+	IF	banked_mode
+
+	EXTERN	?X_CALL_L18
+
+	MOV	A,#$BYTE3 main
+	MOV	DPTR,#main
+	LCALL	?X_CALL_L18		; main()
+
+	ELSE
+
+	LCALL	main			; main()
+
+	ENDIF
+
+;---------------------------------------------------------------;
+; Now when we are ready with our C program (usually 8051 C    	;
+; programs are continuous) we must perform a system-dependent	;
+; action.  In this simple case we just stop.		      	;
+;---------------------------------------------------------------;
+; DO NOT CHANGE NEXT LINE OF CSTARTUP IF YOU WANT TO RUN YOUR 	;
+; SOFTWARE WITH THE AID OF THE C-SPY HLL DEBUGGER.  IT CAN	;
+; THOUGH BE REMOVED IF YOUR PROGRAM IS CONTINUOUS (NO EXIT).	;
+; If it is removed the EXTERN ?C_EXIT line should also be re-	;
+; moved to avoid linking of the "exit" module			;
+;---------------------------------------------------------------;
+	LJMP	?C_EXIT	
+
+;---------------------------------------------------------------;
+; Last part of the C variable initializer code.		      	;
+;---------------------------------------------------------------;
+COMP_R67_DPTR:
+;===========================;
+;       *** WDG ***	    ;
+;                           ;
+; ACC, B, R0-R3 may be used ;
+;===========================;
+	MOV	A,R7
+	XRL	A,DPL
+	JNZ	NOT_EQUAL
+	MOV	A,R6
+	XRL	A,DPH
+NOT_EQUAL:
+	RET
+
+DI_INIT:
+	CLR	A
+	MOVC	A,@A+DPTR
+	MOV	R0,A
+	MOV	A,#1
+	MOVC	A,@A+DPTR
+	MOV	R1,A
+	MOV	A,#2
+	MOVC	A,@A+DPTR
+	MOV	R6,A
+	MOV	A,#3
+	MOVC	A,@A+DPTR
+	MOV	DPL,A
+	MOV	DPH,R6
+MORE_DI_COPY:
+;===========================;
+;       *** WDG ***	    ;
+;                           ;
+; ACC, B, R2-R6 may be used ;
+;===========================;
+	MOV	A,R0
+	XRL	A,R1
+	JNZ	$+3
+	RET
+	CLR	A
+	MOVC	A,@A+DPTR
+	MOV	@R0,A
+	INC	DPTR
+	INC	R0
+	SJMP	MORE_DI_COPY
+
+X_INIT:
+	CLR	A
+	MOVC	A,@A+DPTR
+	MOV	R4,A
+	MOV	A,#1
+	MOVC	A,@A+DPTR
+	MOV	R5,A
+	MOV	A,#2
+	MOVC	A,@A+DPTR
+	MOV	R6,A
+	MOV	A,#3
+	MOVC	A,@A+DPTR
+	MOV	R7,A
+	MOV	A,#4
+	MOVC	A,@A+DPTR
+	MOV	R0,A
+	MOV	A,#5
+	MOVC	A,@A+DPTR
+	MOV	DPL,A
+	MOV	DPH,R0
+MORE_X_COPY:
+	LCALL	COMP_R67_DPTR
+	JNZ	$+3
+	RET
+	CLR	A
+	MOVC	A,@A+DPTR
+	INC	DPTR
+	MOV	R0,DPH
+	MOV	R1,DPL
+	MOV	DPH,R4
+	MOV	DPL,R5
+	MOVX	@DPTR,A
+	INC	DPTR
+	MOV	R4,DPH
+	MOV	R5,DPL
+	MOV	DPH,R0
+	MOV	DPL,R1
+	SJMP	MORE_X_COPY
+
+DATA_TABLE:
+	DB	SFB (D_IDATA)
+	DB	SFE (D_IDATA)
+	DW	SFB (D_CDATA)
+IDATA_TABLE:
+	DB	SFB (I_IDATA)
+	DB	SFE (I_IDATA)
+	DW	SFB (I_CDATA)
+XDATA_TABLE:
+	DW	SFB (X_IDATA)
+	DW	SFE (X_CDATA)
+	DW	SFB (X_CDATA)
+YDATA_TABLE:
+	DW	SFB (ECSTR)
+	DW	SFE (CCSTR)
+	DW	SFB (CCSTR)
+
+	RSEG	D_UDATA
+	RSEG	I_UDATA
+	RSEG	X_UDATA
+	RSEG	D_CDATA
+	RSEG	I_CDATA
+	RSEG	X_CDATA
+	RSEG	D_IDATA
+	RSEG	I_IDATA
+	RSEG	X_IDATA
+	RSEG	ECSTR
+	RSEG	CCSTR
+
+	ENDMOD	startup
+
+;---------------------------------------------------------------;
+; Function/module: exit (int code)			      	;
+;							      	;
+; When C-SPY is used this code will automatically be replaced 	;
+; by a 'debug' version of exit().			      	;
+;---------------------------------------------------------------;
+	MODULE	exit
+
+	PUBLIC	exit
+	$DEFFN	exit(0,0,0,0,0,0,0,0)
+	PUBLIC	?C_EXIT
+
+	RSEG	RCODE
+
+?C_EXIT:
+exit:
+;---------------------------------------------------------------;
+; The next line could be replaced by user defined code.       	;
+;---------------------------------------------------------------;
+	SJMP	$		; Forever... 
+
+	END
+

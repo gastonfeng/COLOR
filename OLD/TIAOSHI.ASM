@@ -1,0 +1,57 @@
+;²ÊÀ©»úµ÷ÊÔÄ£¿é    5-9-95
+tiaoshi:
+        mov x,#0
+        mov y,#0
+        mov l,#4
+        mov h,#128
+        lcall lcd_cls
+        mov dptr,#msg30
+        mov x,#0
+        mov y,#0
+        lcall lcd_str
+        mov dptr,#msg31
+        mov x,#2
+        mov y,#0
+        lcall lcd_str
+        lcall get_num
+        mov dptr,#msg32
+        mov x,#2
+        mov y,#0
+        lcall lcd_str
+        lcall get_step
+        lcall uiji
+        mov dptr,#msg33
+        mov x,#2
+        mov y,#0
+        lcall lcd_str
+        lcall key_bri
+        mov a,number
+        rr a
+        mov r1,a
+t_loop1:
+        mov a,pre_r
+        subb a,step_r
+        mov pre_r,a
+        mov a,pre_g
+        subb a,step_g
+        mov pre_g,a
+        mov a,pre_b
+        subb a,step_b
+        mov pre_b,a
+        djnz r1,t_loop1
+        mov r1,number
+t_loop2:
+        go r
+        go g
+        go b
+        mov a,pre_r
+        add a,step_r
+        mov pre_r,a
+        mov a,pre_g
+        add a,step_g
+        mov pre_g,a
+        mov a,pre_b
+        add a,step_b
+        mov pre_b,a
+        djnz r1,t_loop2
+        ret

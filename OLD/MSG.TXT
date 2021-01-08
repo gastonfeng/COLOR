@@ -1,0 +1,13 @@
+msg1:	db 自检
+msg2:	db 预热，药液温度   烘干温度
+msg3:	db 准备好
+msg4:	db 走纸
+msg5:	db 试机
+msg6:	db 对焦
+msg7:	db 光路故障
+msg8:	db 走纸故障
+msg9:	db 烘干故障
+msg10:	db 缺纸
+msg11:	db 缺液
+msg12:	db 温度低
+
